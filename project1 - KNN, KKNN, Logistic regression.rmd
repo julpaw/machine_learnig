@@ -1,0 +1,534 @@
+---
+title: "Project 1 - KNN, KKNN, logistic regression, ROC, AUC"
+author: "Julia Pawlus"
+output:
+  html_document: default
+  pdf_document: default
+---
+Task 1. Preliminary Questions
+
+For what purpose is a dataset divided into a training set and a test set? How should this division be carried out?
+
+The division is used in conducting machine learning methods, where training sets are utilized for estimating parameters and comparing performance, while test data is used to compare and verify whether the model works correctly and is properly constructed. Most commonly, the training part of the model constitutes 80% of the data, and the test part makes up the remaining 20%.
+
+What is a confusion matrix?
+
+A confusion matrix helps to easily present the assumptions regarding our project by indicating which factors occur through positive classification (correctly classified), negative classification (incorrectly classified), as well as false positives (incorrect classification, Type I error) and false negatives (incorrect classification, Type II error).
+
+What is the difference between accuracy, sensitivity, and specificity? Which of these measures is more important and in what case? Provide examples.
+
+Accuracy is the percentage of correct classifications achieved by the trained model among all cases.
+Sensitivity is a measure that considers all cases where the true value is Y=1.
+Specificity is a measure that considers all cases where the true value is Y=0.
+Referring to the given dataset from the "stroke" file, sensitivity would be the most important measure for us because we aim for the highest possible number of true cases where Y=1—in our case, as many instances of strokes as possible.
+
+```{r}
+library(readr)
+library(tidyverse)
+library(ROSE)
+library(ggplot2)
+library(pROC)
+library(caret)
+library(class)
+library(ggplot2)
+library(kknn)
+```
+
+```{r}
+data <- read.csv("stroke.csv", sep = ";")  
+data <- head(data, 3500)
+
+KCount<-30
+```
+
+```{r}
+data$gender <- as.factor(data$gender)
+data$age <- as.numeric(data$age)
+data$hypertension <- as.factor(data$hypertension)
+data$heart_disease <- as.factor(data$heart_disease)
+data$ever_married <- as.factor(data$ever_married)
+data$work_type <- as.factor(data$work_type)
+data$Residence_type <- as.factor(data$Residence_type)
+data$avg_glucose_level <- as.numeric(data$avg_glucose_level)
+data$bmi <- as.numeric(data$bmi)
+data$smoking_status <- as.factor(data$smoking_status)
+data$stroke <- as.factor(data$stroke)
+```
+
+```{r}
+data %>%
+   select_if(is.factor) %>%
+  summary()
+```
+
+```{r}
+data %>%
+  select_if(is.numeric) %>%
+  summary()
+```
+
+```{r}
+data <- data %>%
+  group_by(gender) %>%
+  mutate(bmi = ifelse(is.na(bmi), mean(bmi, na.rm = TRUE), bmi)) %>%
+  ungroup()
+```
+
+```{r}
+data %>%
+  select(bmi) %>%
+  summary()
+```
+
+```{r}
+set.seed(1234)
+```
+#Split into Training and Test Set
+```{r}
+sample_set <- sample(nrow(data), round(nrow(data)*.80), replace = FALSE)
+```
+
+```{r}
+data_train <- data[sample_set, ]
+```
+
+```{r}
+data_test <- data[-sample_set, ]
+```
+#Proportions of Classes in the Entire, Training, and Test Sets
+```{r}
+round(prop.table(table(select(data, stroke), exclude = NULL)), 4)* 100
+```
+```{r}
+round(prop.table(table(select(data_train, stroke), exclude = NULL)), 4)* 100
+```
+
+```{r}
+round(prop.table(table(select(data_test, stroke), exclude = NULL)), 4)* 100
+```
+#Balancing the Training Set Using ROSE
+```{r}
+table(data_train$stroke)
+data_train <- ROSE(stroke~.,data=data_train, p=0.5, N=round(nrow(data)*.80), seed = 1 )$data
+table(data_train$stroke)
+```
+
+```{r}
+round(prop.table(table(select(data_train, stroke), exclude = NULL)), 4)* 100
+```
+Task 2. KNN Method
+
+How does the k-nearest neighbors (KNN) method work?
+
+The k-nearest neighbors method determines the nearest neighbors for each element based on the assumption that close elements are similar. It takes into account the distance from the new element relative to its neighbors.
+
+What is 'k' in the KNN method? How to choose the appropriate value of 'k'?
+
+'k' is the number of nearest neighbors considered when classifying a new point. The appropriate value of 'k' is selected empirically, usually by testing different values and choosing the one that gives the best results on a validation set.
+
+Should 'k' be an even number, an odd number, or does it not matter? Justify your answer by conducting an appropriate simulation.
+
+In problems with two classes, it is recommended to use an odd value of 'k' to avoid ties during majority voting. Tests have shown that odd values of 'k' can lead to slightly better results in such cases.
+
+Is data standardization required when using the k-nearest neighbors method? Why or why not? Apply the KNN method to data without standardization and with standardization. Compare the obtained results.
+
+Data standardization is not required when using the k-nearest neighbors method, but it is often recommended. This technique relies on the distances between data points. Standardizing the data helps to equalize the range of values across different features, which has a significant impact on the results.
+
+```{r}
+normalize <- function(x){
+  return((x - min(x))/ (max(x) - min(x)))
+}
+```
+
+```{r}
+data_train_k <- data_train %>%
+  mutate(age = normalize(age),
+         avg_glucose_level = normalize(avg_glucose_level),
+         bmi = normalize(bmi)) %>%
+  select(age, avg_glucose_level, bmi, stroke)
+
+data_test_k <- data_test %>%
+  mutate(age = normalize(age),
+         avg_glucose_level = normalize(avg_glucose_level),
+         bmi = normalize(bmi)) %>%
+  select(age, avg_glucose_level, bmi, stroke)
+
+
+  
+```
+
+```{r}
+summary(data_train_k)
+
+summary(data_test_k)
+```
+
+
+
+```{r}
+
+# Function for prediction and calculating accuracy
+data_train_labels <- data_train_k$stroke
+data_test_labels <- data_test_k$stroke
+
+prediction <- function(K) {
+  knn_pred <- knn(train = data_train_k %>% select(-stroke),
+                  test = data_test_k %>% select(-stroke),
+                  cl = data_train_labels, k = K)
+  
+  accuracy <- sum(knn_pred == data_test_labels) / length(data_test_labels)
+  
+  return(accuracy)
+}
+
+# Testing different values of k
+best_result <- -Inf
+best_K <- 0
+results_df <- data.frame(K = numeric(0), Result = numeric(0))
+
+for (K in 1:KCount) {
+  result <- prediction(K)
+  cat("K =", K, "Accuracy =", result, "\n")
+  results_df <- rbind(results_df, data.frame(K = K, Result = result))
+  if (result > best_result) {
+    best_result <- result
+    best_K <- K
+  }
+}
+
+cat("Best result:", best_result, "for K =", best_K)
+# Plot of accuracy depending on k
+ggplot(data = results_df, aes(x = K, y = Result)) +
+  geom_line() +
+  geom_point() +
+  labs(x = "K", y = "Accuracy") +
+  theme_minimal()
+
+
+
+```
+5. How can the KNN method be used to solve a regression problem?
+
+The KNN method can be applied to regression problems by calculating a numerical prediction for a new data point based on the average or weighted average of the numerical values of its K nearest neighbors. In KNN regression, we compute the distances between the target point and the training data, select the K closest neighbors, and then calculate the predicted value as the mean numerical value of these neighbors.
+
+6. Does the size of the dataset matter in the case of this method? Check whether the number of observations affects the obtained results.
+
+The size of the dataset does matter. A larger dataset provides more information to the model, which can improve its performance. We will verify this by training the model on datasets of different sizes to see if the number of observations influence the results.
+ 
+```{r}
+# Testing the impact of the number of observations on results
+fractions <- c(0.5, 0.6, 0.7, 0.8)
+results_df <- data.frame(Fraction = numeric(0), Accuracy = numeric(0))
+
+for (frac in fractions) {
+  set.seed(123)
+  sample_indices <- sample(1:nrow(data_train_k), size = floor(frac * nrow(data_train_k)))
+  data_train_frac <- data_train_k[sample_indices, ]
+  data_train_labels_frac <- data_train_frac$stroke
+
+  knn_pred_frac <- knn(train = data_train_frac %>% select(-stroke),
+                       test = data_test_k %>% select(-stroke),
+                       cl = data_train_labels_frac, k = best_K)
+
+  accuracy_frac <- sum(knn_pred_frac == data_test_labels) / length(data_test_labels)
+
+  results_df <- rbind(results_df, data.frame(Fraction = frac, Accuracy = accuracy_frac))
+}
+
+# Plot
+ggplot(data = results_df, aes(x = Fraction, y = Accuracy)) +
+  geom_line() +
+  geom_point() +
+  labs(x = "Fraction of Training Set", y = "Accuracy on Test Set") +
+  theme_minimal()
+
+```
+ 
+Task 2. KNN Method
+
+Can categorical variables be used in this method, and if so, how?
+
+Yes, categorical variables can be used by encoding them into numerical values, for example, using dummy variables (one-hot encoding).
+
+What are the advantages and disadvantages of this method?
+
+Advantages of the KNN method:
+
+It is easy to understand and implement.
+It does not make any assumptions about the distribution of the data used, which allows it to be applied to various problems.
+It can be used for both classification and regression problems.
+It is efficient because it works well with a large number of classes.
+The training phase is quick, mainly because this method does not construct a new model but uses available examples to make predictions when necessary.
+Disadvantages of the KNN method:
+
+Difficulty in choosing the appropriate value of k.
+It does not work well with large datasets because the cost of calculating the distance between a new point and every existing point is significant, which decreases the algorithm's efficiency.
+The algorithm does not support working with missing data.
+It is necessary to perform scaling (standardization and normalization) on the dataset before feeding it into the KNN algorithm. Otherwise, variables with a larger range can dominate those with a smaller range, leading to incorrect predictions.
+It stores information about all cases in memory, which can lead to high memory usage, especially with large datasets.
+Task 3. KKNN Method
+
+What distinguishes the KKNN method from the KNN method?
+
+The KNN method uses Euclidean distance, whereas the KKNN method utilizes kernel functions to weight neighbors according to their distances. This approach allows KKNN to handle data with more complex patterns. KKNN can be more computationally intensive than KNN.
+
+Are there limitations regarding the choice of the value of k in this method?
+
+Yes, this method also has limitations concerning the choice of k. The higher the value of k, the less sensitive the model is to noise and outliers. However, this increases the risk that the model will not capture certain important data patterns. Conversely, a lower value of k allows for more complex decision boundaries that are better fitted to the data patterns, but outliers and noise have a greater influence.
+
+Does the size of the dataset matter in this method? Check whether the number of observations affects the obtained results.
+
+The size of the dataset does matter in this method. When using three independent variables—age, BMI, and gender—the results are different compared to using all variables.
+
+5. How can the KNN method be used to solve regression problems?
+
+KNN can be used to solve regression problems by calculating a numerical prediction for a new data point based on the mean or weighted mean of the numerical values of the K nearest neighbors. In the KNN regression process, we compute the distances between the target point and the training data, select the K nearest neighbors, and then calculate the predicted value as the average numerical value of these neighbors.
+
+6. Does the size of the dataset matter in this method? Check whether the number of observations affects the obtained results.
+
+The size of the dataset does matter. A larger dataset provides more information to the model, which can improve its performance. We will verify this by training the model on datasets of different sizes.
+
+```{r}
+# Test of the impact of the number of observations on results
+fractions <- c(0.5, 0.6, 0.7, 0.8)
+results_df <- data.frame(Fraction = numeric(0), Accuracy = numeric(0))
+
+for (frac in fractions) {
+  set.seed(123)
+  sample_indices <- sample(1:nrow(data_train_k), size = floor(frac * nrow(data_train_k)))
+  data_train_frac <- data_train_k[sample_indices, ]
+  data_train_labels_frac <- data_train_frac$stroke
+
+  knn_pred_frac <- knn(train = data_train_frac %>% select(-stroke),
+                       test = data_test_k %>% select(-stroke),
+                       cl = data_train_labels_frac, k = best_K)
+
+  accuracy_frac <- sum(knn_pred_frac == data_test_labels) / length(data_test_labels)
+
+  results_df <- rbind(results_df, data.frame(Fraction = frac, Accuracy = accuracy_frac))
+}
+
+# Plot
+ggplot(data = results_df, aes(x = Fraction, y = Accuracy)) +
+  geom_line() +
+  geom_point() +
+  labs(x = "Fraction of Training Set", y = "Accuracy on Test Set") +
+  theme_minimal()
+
+```
+
+7. Can categorical variables be used in this method, and if so, how?
+
+Yes, categorical variables can be used by encoding them into numerical values, for example, using dummy variables (one-hot encoding).
+
+8. What are the advantages and disadvantages of this method?
+
+Advantages of the KNN method:
+
+It is easy to understand and implement.
+It does not make any assumptions about the distribution of the data used, which allows it to be applied to solving various problems.
+It can be used for both classification and regression problems.
+It is efficient because it works well with a large number of classes.
+The training phase is quick, mainly because this method does not construct a new model but uses available examples to make predictions when necessary.
+Disadvantages of the KNN method:
+
+Difficulty in choosing the appropriate value of k.
+It does not work well with large datasets because the cost of calculating the distance between the new point and every existing point is significant, which decreases the efficiency of the algorithm.
+The algorithm does not support working with missing data.
+It is necessary to perform scaling (standardization and normalization) on the dataset before passing it to the KNN algorithm. Otherwise, variables with a larger range can dominate those with a smaller range, leading to incorrect predictions.
+It stores information about all cases in memory, which can lead to high memory usage, especially with large datasets.
+Task 3. KKNN Method
+
+What distinguishes the KKNN method from the KNN method?
+
+The KNN method uses Euclidean distance, whereas the KKNN method uses kernel functions to weight neighbors according to their distances, which allows it to handle data with more complex patterns. KKNN can be more computationally intensive than KNN.
+
+Are there limitations regarding the choice of the value of k in this method?
+
+In this method, there are also limitations regarding the choice of k. The higher the value of k, the less sensitive the model is to noise and outliers. However, this increases the risk that the model will not capture certain important data patterns. Conversely, a lower value of k allows for more complex decision boundaries that are better fitted to the data patterns, but outliers and noise have a greater influence.
+
+Does the size of the dataset matter in this method? Check whether the number of observations affects the obtained results.
+
+The size of the dataset does matter in this method. Using three independent variables—age, BMI, and gender—yields different results compared to using all variables.
+
+```{r}
+# Test of the impact of the number of observations on results for KKNN
+fractions <- c(0.5, 0.6, 0.7, 0.8)
+results_kknn <- data.frame(Fraction = numeric(0), Accuracy = numeric(0))
+
+set.seed(123)  # Move set.seed outside the loop to ensure reproducibility
+
+for (frac in fractions) {
+  # Resample until both classes are present
+  repeat {
+    sample_indices <- sample(1:nrow(data_train), size = floor(frac * nrow(data_train)))
+    data_train_frac <- data_train[sample_indices, ]
+    class_counts <- table(data_train_frac$stroke)
+    
+    # Check if both classes are present
+    if (length(class_counts) == 2) {
+      break
+    }
+    # If not, resample
+  }
+  
+  # Build the KKNN model
+  model_kknn_frac <- kknn(stroke ~ ., data_train_frac, data_test)
+  
+  # Extract predicted probabilities for class "1"
+  predicted_probs_frac <- model_kknn_frac$prob[, "1"]
+  
+  # Check for NAs in predicted probabilities
+  if (any(is.na(predicted_probs_frac))) {
+    warning(paste("Predicted probabilities contain NA values for fraction", frac))
+    accuracy_frac <- NA
+  } else {
+    predicted_class_frac <- ifelse(predicted_probs_frac >= 0.5, 1, 0)
+    actual_class <- as.numeric(as.character(data_test$stroke))
+    
+    accuracy_frac <- sum(predicted_class_frac == actual_class) / length(actual_class)
+  }
+  
+  results_kknn <- rbind(results_kknn, data.frame(Fraction = frac, Accuracy = accuracy_frac))
+}
+
+# Remove rows with NA Accuracy before plotting
+results_kknn <- results_kknn[!is.na(results_kknn$Accuracy), ]
+
+# Plot
+ggplot(data = results_kknn, aes(x = Fraction, y = Accuracy)) +
+  geom_line() +
+  geom_point() +
+  labs(x = "Fraction of Training Set", y = "Accuracy on Test Set") +
+  theme_minimal()
+```
+Task 4. Logistic Regression
+
+What are the assumptions of logistic regression?
+
+In the logistic regression model, independent variables should not be collinear. The dependent variable should be appropriately coded because this model calculates the probability of the dependent variable taking the value 1. A randomly selected sample should also be sufficiently large.
+
+How does this method handle categorical variables?
+
+Logistic regression handles categorical variables by encoding them as dummy variables (binary variables). Each category is represented by a separate binary variable. It is important to avoid the dummy variable trap, which occurs when variables are linearly dependent.
+
+Is data standardization necessary in logistic regression? Apply this method to data without standardization and with standardization. Compare the obtained results.
+
+The prediction accuracy of the model decreased when using standardized data, dropping to 59% compared to 75% obtained with the model without standardization. This indicates that standardization is not necessary in logistic regression.
+
+```{r}
+model4_1 <- glm(data = data_train, family = binomial, formula = stroke ~ .)
+summary(model4_1)
+exp(coef(model4_1))
+
+predicted_probs <- predict(model4_1, newdata = data_test, type = "response")
+predicted_class <- ifelse(predicted_probs > 0.5, 1, 0)
+actual_class <- as.numeric(as.character(data_test$stroke))
+
+accuracy <- sum(predicted_class == actual_class) / length(actual_class)
+cat("Accuracy without standardization:", accuracy, "\n")
+
+data_train_s <- data_train %>%
+  mutate(age = scale(age),
+         avg_glucose_level = scale(avg_glucose_level),
+         bmi = scale(bmi))
+
+data_test_s <- data_test %>%
+  mutate(age = scale(age),
+         avg_glucose_level = scale(avg_glucose_level),
+         bmi = scale(bmi))
+
+model4_2 <- glm(data = data_train_s, family = binomial, formula = stroke ~ .)
+summary(model4_2)
+exp(coef(model4_2))
+
+predicted_probs_s <- predict(model4_2, newdata = data_test_s, type = "response")
+predicted_class_s <- ifelse(predicted_probs_s > 0.5, 1, 0)
+actual_class_s <- as.numeric(as.character(data_test_s$stroke))
+
+accuracy_s <- sum(predicted_class_s == actual_class_s) / length(actual_class_s)
+cat("Accuracy with standardization:", accuracy_s, "\n")
+```
+Do outliers affect the results obtained by this method? Verify this by building models based on different input data sets (with and without outliers).
+
+After removing outliers, the prediction accuracy of the model slightly increased to 76%, compared to 75% for the model with outliers.
+
+```{r}
+# Histogram plots
+ggplot(data_train, aes(x = age)) +
+  geom_histogram(binwidth = 1)
+
+ggplot(data_train, aes(x = avg_glucose_level)) +
+  geom_histogram(binwidth = 2)
+
+ggplot(data_train, aes(x = bmi)) +
+  geom_histogram(binwidth = 0.5)
+
+# Removing outliers
+data_train_o <- data_train %>%
+  filter(age <= quantile(age, 0.99),
+         avg_glucose_level <= quantile(avg_glucose_level, 0.99),
+         bmi <= quantile(bmi, 0.99))
+
+model4_3 <- glm(data = data_train_o, family = binomial, formula = stroke ~ .)
+summary(model4_3)
+exp(coef(model4_3))
+
+predicted_probs_o <- predict(model4_3, newdata = data_test, type = "response")
+predicted_class_o <- ifelse(predicted_probs_o > 0.5, 1, 0)
+actual_class_o <- as.numeric(as.character(data_test$stroke))
+
+accuracy_o <- sum(predicted_class_o == actual_class_o) / length(actual_class_o)
+cat("Accuracy after removing outliers:", accuracy_o, "\n")
+```
+How should the results (parameter values) obtained in logistic regression be interpreted? Interpret the parameter values obtained during the construction of the logistic regression model.
+
+To interpret the results, we use the values found in the coefficients section of the output, which represents the linear part of the model. It is important to determine whether the parameter is greater or less than zero. In the case of the "stroke" dataset, we are modeling the probability of a stroke or its absence. For a more detailed analysis, the odds ratio is used. The reference parameter is the occurrence of a stroke. For the presented model (model4_1), the probability of a stroke is higher for coefficients such as smoking_statussmokes, Residence_typeUrban, avg_glucose_level, bmi, age, hypertension1, and heart_disease1 compared to others. The odds of having a stroke increase by a factor of 9.358 for each male, assuming all other predictors remain the same.
+
+Task 5. ROC Curve and AUC Value
+
+What is a cutoff threshold?
+
+A cutoff threshold is a value (level) that allows assigning an object to one of the classes based on the probability value.
+
+What is an ROC curve and AUC value? How are they created/calculated?
+
+The ROC curve evaluates the classifier's performance, while the AUC (Area Under the Curve) value measures the area under the ROC curve, representing the overall classification ability of the model. The ROC curve is created by plotting the true positive rate against the false positive rate, and the AUC value is the integrated area under the ROC curve.
+
+Present the ROC curve for the models: KNN and logistic regression. Compare them.
+
+```{r}
+# ROC curve for logistic regression
+predicted_probs_lr <- predict(model4_1, newdata = data_test, type = "response")
+roc_lr <- roc(data_test$stroke, predicted_probs_lr)
+plot(roc_lr, col = "blue", print.auc = TRUE, main = "Comparison of ROC Curves")
+
+# ROC curve for KNN
+library(caret)
+knn_model <- knn3(x = data_train_k %>% select(-stroke), y = data_train_labels, k = best_K)
+predicted_probs_knn <- predict(knn_model, data_test_k %>% select(-stroke), type = "prob")
+predicted_probs_knn_positive <- predicted_probs_knn[, "1"]
+roc_knn <- roc(data_test$stroke, predicted_probs_knn_positive)
+plot(roc_knn, col = "red", add = TRUE, print.auc = TRUE, print.auc.y = 0.4)
+
+# ROC curve for KKNN
+model_kknn <- kknn(stroke ~ ., data_train, data_test, k = best_K)
+
+# Extract predicted probabilities for class "1"
+predicted_probs_kknn <- model_kknn$prob[, "1"]
+
+# Ensure that the response variable is numeric
+actual_class_kknn <- as.numeric(as.character(data_test$stroke))
+
+# Plot ROC curve
+roc_kknn <- roc(actual_class_kknn, predicted_probs_kknn)
+plot(roc_kknn, col = "green", add = TRUE, print.auc = TRUE, print.auc.y = 0.3)
+legend("bottomright", legend = c("Logistic Regression", "KNN", "KKNN"),
+       col = c("blue", "red", "green"), lwd = 2)
+
+```
+
+
+
+
+
